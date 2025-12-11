@@ -1,0 +1,1402 @@
+library(readr)
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+
+#load dataset
+hotel_bookings <- read.csv("hotel_bookings.csv", na.strings = "NULL")
+
+getwd()
+
+###### missing values ######
+##make 'adults', 'children', 'babies' as numeric
+hotel_bookings$adults   <- as.numeric(as.character(hotel_bookings$adults))
+hotel_bookings$children <- as.numeric(as.character(hotel_bookings$children))
+hotel_bookings$babies   <- as.numeric(as.character(hotel_bookings$babies))
+
+#impute 'agent' NA with 0 (representing a direct booking)
+hotel_bookings$agent[is.na(hotel_bookings$agent)] <- 0
+
+#impute 'children' NA with 0 (only 4 rows)
+hotel_bookings$children[is.na(hotel_bookings$children)] <- 0
+
+#impute 'country' NA with 'Unknown'
+#make 'country' a character, then impute
+hotel_bookings$country <- as.character(hotel_bookings$country)
+hotel_bookings$country[is.na(hotel_bookings$country)] <- "Unknown"
+
+hotel_bookings$company <- NULL
+
+###### new columns for clear analysis ######
+#create total_nights
+hotel_bookings$total_nights <- 
+  hotel_bookings$stays_in_weekend_nights + hotel_bookings$stays_in_week_nights
+
+#create total_guests
+hotel_bookings$total_guests <- 
+  hotel_bookings$adults + hotel_bookings$children + hotel_bookings$babies
+
+
+
+###### filter illogical entries ######
+#get original row count before filtering
+original_rows <- nrow(hotel_bookings)
+
+#filter out bookings with 0 guests OR 0 nights
+hotel_bookings <- 
+  hotel_bookings[hotel_bookings$total_guests > 0 
+                 & hotel_bookings$total_nights > 0, ]
+
+
+###### data check ######
+#convert reservation_status_date to a proper Date object
+hotel_bookings$reservation_status_date <- 
+  as.Date(hotel_bookings$reservation_status_date, format="%Y-%m-%d")
+
+
+unique(hotel_bookings$country)
+hotel_bookings %>% count(country)
+
+###### amount to remove ######
+
+# 1. count rows with 0 guests
+zero_guest_count <- sum(hotel_bookings$total_guests == 0)
+cat("Bookings with 0 guests:", zero_guest_count, "\n")
+
+# 2. count rows with 0 nights
+zero_night_count <- sum(hotel_bookings$total_nights == 0)
+cat("Bookings with 0 nights:", zero_night_count, "\n")
+
+# 3. count the OVERLAP (rows with BOTH 0 guests AND 0 nights)
+overlap_count <- sum(hotel_bookings$total_guests == 0 & hotel_bookings$total_nights == 0)
+cat("Bookings with BOTH 0 guests AND 0 nights (the overlap):", overlap_count, "\n")
+
+# 4. amount of the unique rows to be removed
+total_to_remove <- zero_guest_count + zero_night_count - overlap_count
+cat("Total unique rows to remove:", total_to_remove, "\n")
+
+
+###### summary ######
+cat("Original rows:", original_rows, "\n")
+cat("Cleaned rows:", nrow(hotel_bookings), "\n")
+cat("Total rows removed:", original_rows - nrow(hotel_bookings), "\n")
+
+
+
+#exploring
+nrow(hotel_bookings)
+ncol(hotel_bookings)
+
+
+
+###### slide 6 ######
+# tapply() is a base R function that applies a function (mean)
+# to a variable (is_canceled) grouped by another variable (hotel).
+hotel_cancel_rate <- tapply(hotel_bookings$is_canceled, 
+                            hotel_bookings$hotel, 
+                            mean)
+
+#bar chart
+barplot(hotel_cancel_rate * 100,
+        main = "Cancellation Rate by Hotel Type",
+        xlab = "Hotel Type",
+        ylab = "Cancellation Rate (%)",
+        col = c("lightblue", "tomato"),
+        ylim = c(0, 50))
+
+
+boxplot(hotel_bookings$lead_time ~ hotel_bookings$is_canceled, 
+        main = "Lead Time vs. Cancellation Status",
+        ylab = "Lead Time (Days)",
+        xlab = " ",
+        names = c("Not Canceled", "Canceled"),
+        ylim = c(0, 250),  
+        col = "lightblue")
+
+
+deposit_rate <- tapply(hotel_bookings$is_canceled, 
+                       hotel_bookings$deposit_type, 
+                       mean) * 100 
+barplot(deposit_rate,
+        main = "Cancellation Rate by Deposit Type",
+        ylab = "Cancellation Rate (%)",
+        xlab = "Deposit Type",
+        col = c("tomato", "lightblue", "grey"))
+
+
+
+# calc mean cancellation rate for each customer type
+customer_rate <- tapply(hotel_bookings$is_canceled, 
+                        hotel_bookings$customer_type, 
+                        mean) * 100
+
+# results
+barplot(customer_rate,
+        main = "Cancellation Rate by Customer Type",
+        ylab = "Cancellation Rate (%)",
+        xlab = "Customer Type",
+        col = c("lightblue", "tomato", "lightgreen", "grey"))
+
+
+
+
+################## clustered for resort and city #####
+
+
+bar_colors <- c(  "lightblue", "darkblue",      # cluster 1: Contract (City, Resort)
+  "lightgreen", "darkgreen",   # cluster 2: Group (City, Resort)
+  "lightcoral", "darkred",     # cluster 3: Transient (City, Resort)
+  "orange", "#CD661D"        # cluster 4: Transient-Party (City, Resort)
+)
+
+grouped_rate <- tapply(hotel_bookings$is_canceled,
+                       list(hotel_bookings$hotel, hotel_bookings$customer_type),
+                       mean,
+                       na.rm = TRUE) * 100
+
+barplot(grouped_rate,
+        main = "Cancellation Rate by Hotel and Customer Type",
+        ylab = "Cancellation Rate (%)",
+        xlab = "Customer Type",
+
+        beside = TRUE,
+        col = bar_colors, 
+        legend.text = FALSE,)
+
+
+legend("topright",
+       legend = c("Contract", "Group", "Transient", "Transient-Party", "", "City Hotel (Light)", "Resort Hotel (Dark)"),
+       fill = c("lightblue", "lightgreen", "lightcoral", "orange", NA, "lightgrey", "dimgrey"),
+       border = NA,
+       bty = "n")
+
+
+
+#### trying
+deposit_rate <- tapply(hotel_bookings$is_canceled, 
+                       hotel_bookings$deposit_type, 
+                       mean, 
+                       na.rm = TRUE) * 100
+
+#descending order
+sorted_deposit_rate <- sort(deposit_rate, decreasing = TRUE)
+
+#plot 
+barplot(sorted_deposit_rate,
+        main = "Cancellation Rate by Deposit Type",
+        ylab = "Cancellation Rate (%)",
+        xlab = "Deposit Type",
+        col = c("darkred", "tomato", "lightblue"), 
+        ylim = c(0, 100))
+
+####### extra ######
+
+
+filtered_bookings <- hotel_bookings[hotel_bookings$deposit_type != "Non Refund", ]
+
+
+# calcrate on filtered data
+clear_deposit_rate <- tapply(filtered_bookings$is_canceled, 
+                             filtered_bookings$deposit_type, 
+                             mean) * 100
+
+barplot(clear_deposit_rate,
+        main = "Cancellation Rate by Guest Deposit Type",
+        ylab = "Cancellation Rate (%)",
+        xlab = "Deposit Type",
+        col = c("tomato", "lightblue"),
+        ylim = c(0, 40))
+
+
+#for each deposit
+deposit_counts <- table(hotel_bookings$is_canceled, 
+                        hotel_bookings$deposit_type)
+
+#Add clearer row names for the legend
+#(Row 1 is '0', Row 2 is '1')
+rownames(deposit_counts) <- c("Not Canceled", "Canceled")
+
+#Create the barplot
+barplot(deposit_counts,
+        main = "Cancellation Counts by Deposit Type",
+        xlab = "Deposit Type",
+        ylab = "Number of Bookings",
+        beside = TRUE,
+        col = c("lightblue", "tomato"),
+        legend.text = TRUE)
+
+
+
+
+####### slide 7 chart 4 #####
+
+#data frame only no deposit and refundable 
+guest_bookings <- hotel_bookings[hotel_bookings$deposit_type == "No Deposit" | 
+                                   hotel_bookings$deposit_type == "Refundable", ]
+
+#cancellation rate for just two groups
+guest_deposit_rate <- tapply(guest_bookings$is_canceled, 
+                             guest_bookings$deposit_type, 
+                             mean) * 100
+
+#comparison
+barplot(guest_deposit_rate,
+        main = "Effect of a Deposit on Guest Cancellations",
+        ylab = "Cancellation Rate (%)",
+        xlab = "Deposit Type",
+        col = c("tomato", "lightblue"),
+        ylim = c(0, 40)
+        )
+
+##ALTERNATE VERSION, CITY AND HOTEL
+
+grouped_rate <- tapply(guest_bookings$is_canceled, 
+                       list(guest_bookings$hotel, guest_bookings$deposit_type),
+                       mean, na.rm = TRUE) * 100
+
+barplot(grouped_rate, 
+        main = "Effect of Deposit on Cancellations by Hotel Type",
+        ylab = "Cancellation Rate (%)",
+        xlab = "Deposit Type",
+        col = c("lightblue", "tomato"), 
+        beside = TRUE, legend.text = FALSE, ylim = c(0, 80) )
+
+legend("topright", 
+       legend = rownames(grouped_rate), 
+       fill = c("lightblue", "tomato"), bty = "n" )
+
+
+##### idk ####
+proof_table_2 <- table(hotel_bookings$deposit_type, 
+                       hotel_bookings$is_canceled)
+
+print(proof_table_2)
+
+
+
+###### slide 7 ######
+profit_data <- hotel_bookings[hotel_bookings$adr > 0, ]
+boxplot(adr ~ market_segment, 
+        data = profit_data,
+        main = "ADR by Market Segment",
+        ylab = "Average Daily Rate (ADR)",
+        xlab = "Market Segment",
+        ylim = c(0, 300), 
+        col = "lightblue"
+)
+
+
+
+
+####### slide 9 market segment v total revenue ####
+
+#total rev column (adr*daily rate)
+hotel_bookings$total_revenue <- hotel_bookings$adr * hotel_bookings$total_nights
+
+#SUM of all revenue for each segment
+total_rev_by_segment <- tapply(hotel_bookings$total_revenue, 
+                               hotel_bookings$market_segment, 
+                               sum, 
+                               na.rm = TRUE)
+total_rev_by_segment <- sort(total_rev_by_segment, decreasing = TRUE)
+
+#divide by 1 milly to simplify y axis
+revenue_in_millions <- total_rev_by_segment / 1000000
+
+barplot(revenue_in_millions,
+        main = "Total Revenue by Market Segment",
+        ylab = "Total Revenue (in millions)", 
+        xlab = "Market Segment",
+        col = "lightblue",
+        ylim = c(0, 25))
+
+
+
+######## sep ######
+
+pie(table(hotel_bookings$hotel),
+    main = "Hotel Reservation Split",
+    col = c("lightblue", "tomato")
+)
+
+
+
+
+
+
+###### pie chart ######
+#labels
+hotel_counts <- table(hotel_bookings$hotel)
+hotel_pct <- round(prop.table(hotel_counts) * 100)
+pie_labels <- paste(hotel_pct, "%", sep = "")
+legend_labels <- paste(names(hotel_counts), ":", hotel_counts, sep = "")
+
+is.data.frame(hc)
+hc <- data.frame(hotel_counts)
+
+pie(hotel_counts,
+    labels = pie_labels,
+    main = "Hotel Reservation Split",
+    border = "white",
+    lwd = 2,
+    col = c("lightblue", "tomato")
+)
+
+legend("topright",
+       legend = legend_labels,
+       fill = c("lightblue", "tomato"),
+       bty = "n"
+)
+
+
+#white circle for visuals
+symbols(0, 0, circles = 0.5, add = TRUE, inches = 0.1, bg = "lightblue", fg = "white")
+
+
+
+
+
+###### slide 11 boxplot #####
+
+
+boxplot(hotel_bookings$total_nights ~ hotel_bookings$hotel, 
+        main = "Average Length of Stay",
+        ylab = "Average Nights Stayed",
+        xlab = "Hotel Type",
+        names = c("City Hotel", "Resort Hotel"),
+        ylim = c(0, 15),  
+        col = c("lightblue", "tomato"))
+
+        
+
+
+######## sorting martins colours out #######
+hotel_bookings_clean <- hotel_bookings %>%
+  mutate(
+    hotel = as.character(hotel),
+    market_segment = as.character(market_segment),
+    total_revenue = as.numeric(as.character(total_revenue))
+  ) %>%
+  filter(total_revenue > 0)
+
+revenue_summary <- hotel_bookings_clean %>%
+  group_by(hotel, market_segment) %>%
+  summarise(
+    Sum_Revenue = sum(total_revenue, na.rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  mutate(Sum_Revenue_Millions = Sum_Revenue / 1000000)
+
+market_segment_order <- c(
+  "Online TA", "Offline TA/TO", "Direct", "Groups",
+  "Corporate", "Aviation", "Complementary", "Undefined"
+)
+
+revenue_summary$market_segment <- factor(
+  revenue_summary$market_segment,
+  levels = market_segment_order
+)
+
+custom_colors <- c("City Hotel" = "lightblue", "Resort Hotel" = "tomato")
+
+p <- ggplot(revenue_summary, aes(x = market_segment, y = Sum_Revenue_Millions, fill = hotel)) +
+  
+  geom_bar(
+    stat = "identity",
+    position = position_dodge(width = 0.8),
+    width = 0.7,
+    color = "black", 
+    linewidth = 0.2
+  ) +
+  
+  scale_fill_manual(values = custom_colors, name = "Hotel Type") +
+  
+  labs(
+    title = "Total Revenue by Market Segment and Hotel Type",
+    y = "Total Revenue (in Millions €)",
+    x = "Market Segment"
+  ) +
+  
+  scale_y_continuous(limits = c(0, max(revenue_summary$Sum_Revenue_Millions) * 1.05), expand = c(0, 0)) +
+  
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    legend.position = "top",
+    panel.grid.major.x = element_blank()
+  )
+
+print(p)
+
+
+
+
+
+###### clustered slide 9 #####
+
+nine_colors <- c("lightblue", "tomato")
+
+grouped_rate <- tapply(hotel_bookings$is_canceled,
+                       list(hotel_bookings$hotel, hotel_bookings$customer_type),
+                       mean,
+                       na.rm = TRUE) * 100
+
+barplot(grouped_rate,
+        main = "Cancellation Rate by Hotel and Customer Type",
+        ylab = "Cancellation Rate (%)",
+        xlab = "Customer Type",
+        
+        beside = TRUE,
+        col = bar_colors, 
+        legend.text = FALSE,)
+
+
+legend("topright",
+       legend = c("Contract", "Group", "Transient", "Transient-Party", "", "City Hotel (Light)", "Resort Hotel (Dark)"),
+       fill = c("lightblue", "lightgreen", "lightcoral", "orange", NA, "lightgrey", "dimgrey"),
+       border = NA,
+       bty = "n")
+
+
+
+############################ ggplot edits ##################################
+
+library(ggforce)
+
+total_bookings <- sum(hotel_split$count)
+hotel_split <- hotel_bookings %>% 
+  group_by(hotel) %>% 
+  summarise(count = n()) %>% 
+  mutate(percentage = count / sum(count) * 100) %>%
+  mutate(label = paste0(round(percentage, 1), "%
+",
+                        format(count, big.mark = ",")))
+
+
+ggplot(hotel_split, aes(x = " ", y = count, fill = hotel)) +
+  geom_col(colour = "white") +
+  coord_polar(theta = "y", start = 0) +
+  
+  geom_text(aes(label = label), 
+            position = position_stack(vjust = 0.5), 
+            color = "white", fontface = "bold") +
+  
+  theme_void() +
+  labs(title = "Distribution of Bookings by Hotel Type",
+       fill = "Hotel Type") +
+  scale_fill_manual(values = c("City Hotel" = "#006688", 
+                               "Resort Hotel" = "#14BBCC"))
+  
+
+#### slide 6 lead time vs cancellation boxplot ####
+
+ggplot(data = hotel_bookings, 
+       aes(x = as.factor(is_canceled), y = lead_time)) +
+  geom_boxplot(fill = c("#CC4955", "#38A866"), outlier.shape = NA) + 
+  scale_x_discrete(labels = c("Not Canceled", "Canceled")) +
+  coord_cartesian(ylim = c(0, 500)) +
+  labs(title = "Lead Time vs. Cancellation Status", 
+       x = "Cancellation Status", 
+       y = "Lead Time (Days)")
+
+#### slide 6 cancellation rate by hotel type ####
+
+hotel_rates <- hotel_bookings %>%
+  group_by(hotel) %>%
+  summarise(rate = mean(is_canceled) * 100)
+
+ggplot(data = hotel_rates, aes(x = hotel, y = rate, fill = hotel)) +
+  geom_col() +
+  scale_fill_manual(values = c("City Hotel" = "#006688", 
+                               "Resort Hotel" = "#14BBCC")) +
+  labs(title = "Cancellation Rate by Hotel Type", 
+       y = "Cancellation Rate (%)", x = "Hotel Type") +
+  theme(legend.position = "none")
+
+
+#### slide 7.5 deposit cancellation ####
+
+deposit_rates <- hotel_bookings %>%
+  group_by(deposit_type) %>%
+  summarise(rate = mean(is_canceled) * 100)
+
+# or
+
+hotel_bookings %>%
+  group_by(deposit_type) %>%
+  summarise(cancel_rate = mean(is_canceled) * 100) %>%
+  ggplot(aes(x = reorder(deposit_type, -cancel_rate), y = cancel_rate)) +
+  geom_col(fill = "lightblue") +
+  labs(title = "Cancellation Rate by Deposit Type", y = "Cancellation Rate (%)", x = "Deposit Type") +
+  theme_minimal()
+
+
+
+ggplot(data = deposit_rates, aes(x = reorder(deposit_type, -rate), y = rate)) +
+  geom_col(fill = c("pink", "#cc4955", "")) +
+  labs(title = "Cancellation Rate by Deposit Type", 
+       y = "Cancellation Rate (%)", 
+       x = "Deposit Type") +
+  theme_minimal()
+
+
+
+#or 
+hotel_bookings %>%
+  filter(deposit_type != "Non Refund") %>%
+  group_by(deposit_type) %>%
+  summarise(cancel_rate = mean(is_canceled) * 100) %>%
+  ggplot(aes(x = deposit_type, y = cancel_rate)) +
+  geom_col(fill = "lightblue") +
+  coord_cartesian(ylim = c(0, 40)) +
+  labs(title = "Cancellation Rate by Guest Deposit Type", y = "Cancellation Rate (%)", x = "Deposit Type") +
+  theme_minimal()
+
+#or
+hotel_bookings %>%
+  mutate(status = factor(is_canceled, labels = c("Not Canceled", "Canceled"))) %>%
+  ggplot(aes(x = deposit_type, fill = status)) +
+  geom_bar(position = "dodge") +
+  scale_fill_manual(values = c("Not Canceled" = "lightblue", "Canceled" = "tomato")) +
+  labs(title = "Cancellation Counts by Deposit Type", y = "Number of Bookings", x = "Deposit Type", fill = "Status") +
+  theme_minimal()
+#or 
+hotel_bookings %>%
+  filter(deposit_type %in% c("No Deposit", "Refundable")) %>%
+  group_by(hotel, deposit_type) %>%
+  summarise(cancel_rate = mean(is_canceled) * 100, .groups = 'drop') %>%
+  ggplot(aes(x = deposit_type, y = cancel_rate, fill = hotel)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = c("City Hotel" = "lightblue", "Resort Hotel" = "tomato")) +
+  coord_cartesian(ylim = c(0, 80)) +
+  labs(title = "Effect of Deposit on Cancellations by Hotel Type", y = "Cancellation Rate (%)", x = "Deposit Type") +
+  theme_minimal()
+
+
+#or
+deposit_impact <- hotel_bookings %>%
+  filter(deposit_type %in% c("No Deposit", "Refundable")) %>%
+  group_by(hotel, deposit_type) %>%
+  summarise(rate = mean(is_canceled) * 100)
+
+ggplot(data = deposit_impact, 
+       aes(x = deposit_type, y = rate, fill = hotel)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = c("City Hotel" = "#006688", 
+                               "Resort Hotel" = "#14BBCC")) +
+  coord_cartesian(ylim = c(0, 80)) +
+  labs(title = "Effect of Deposit on Cancellations by Hotel Type", 
+       y = "Cancellation Rate (%)", x = "Deposit Type")
+
+
+#### slide 7 cancelation customer type ####
+hotel_bookings %>%
+  group_by(customer_type) %>%
+  summarise(cancel_rate = mean(is_canceled) * 100) %>%
+  ggplot(aes(x = customer_type, y = cancel_rate)) +
+  geom_col(fill = c("lightblue", "lightpink", "lightblue", "lightpink")) +
+  labs(title = "Cancellation Rate by Customer Type", y = "Cancellation Rate (%)", x = "Customer Type") +
+  theme_minimal()
+
+#### clustered 7 ####
+
+grouped_rates <- hotel_bookings %>%
+  group_by(hotel, customer_type) %>%
+  summarise(rate = mean(is_canceled) * 100)
+
+ggplot(data = grouped_rates, 
+       aes(x = customer_type, y = rate, fill = hotel)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = c("City Hotel" = "#006688", 
+                               "Resort Hotel" = "#14BBCC")) +
+  labs(title = "Cancellation Rate by Hotel and Customer Type", 
+       y = "Cancellation Rate (%)", 
+       x = "Customer Type")
+
+
+#### new #### 
+
+
+
+
+hotel_bookings %>%
+  filter(adr > 0) %>%
+  ggplot(aes(x = market_segment, y = adr)) +
+  geom_boxplot(fill = "cadetblue3", outliers = FALSE) +
+  coord_cartesian(ylim = c(0, 300)) +
+  scale_y_continuous(labels = scales::dollar_format(prefix = "€")) +
+  labs(title = "ADR by Market Segment", y = "Average Daily Rate (ADR)", x = "Market Segment") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+# revenue by market segment
+hotel_bookings$total_revenue <- hotel_bookings$adr * hotel_bookings$total_nights
+
+revenue_summary_hotel <- hotel_bookings %>%
+  group_by(hotel, market_segment) %>%
+  summarise(revenue_mil = sum(total_revenue, na.rm = TRUE) / 1000000)
+
+# chart
+ggplot(data = revenue_summary_hotel, aes(x = reorder(market_segment, -revenue_mil), 
+                                         y = revenue_mil, fill = hotel)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = c("City Hotel" = "#006688", "Resort Hotel" = "#14BBCC")) +
+  scale_y_continuous(labels = scales::dollar_format(prefix = "€", suffix = "M")) +
+  labs(title = "Total Revenue by Market Segment and Hotel Type", 
+       y = "Total Revenue (Millions)", x = "Market Segment", fill = "Hotel") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+
+
+
+
+
+
+ggplot(data = hotel_bookings, aes(x = hotel, y = total_nights, fill = hotel)) +
+  geom_boxplot(outliers = FALSE) +
+  scale_fill_manual(values = c("City Hotel" = "#006688", 
+                               "Resort Hotel" = "#14bbcc")) +
+  coord_cartesian(ylim = c(0, 15)) +
+  labs(title = "Average Length of Stay", 
+       y = "Nights Stayed", 
+       x = "Hotel Type") +
+  coord_flip() +
+  theme(legend.position = "none")
+
+
+#length 
+
+ggplot(data = hotel_bookings, aes(x = hotel, y = total_nights, fill = hotel)) +
+  geom_violin() +
+  scale_fill_manual(values = c("City Hotel" = "#006688", 
+                               "Resort Hotel" = "#14bbcc")) +
+  coord_cartesian(ylim = c(0, 15)) +
+  labs(title = "Average Length of Stay", 
+       y = "Nights Stayed", 
+       x = "Hotel Type") +
+  theme(legend.position = "none")
+
+
+
+
+###### new stuff #####
+
+master_cancel_data <- hotel_bookings %>%
+  filter(deposit_type != "Non Refund") %>%
+  group_by(hotel, customer_type, deposit_type) %>%
+  summarise(cancel_rate = mean(is_canceled) * 100, .groups = 'drop')
+
+ggplot(data = master_cancel_data, aes(x = customer_type, y = cancel_rate, fill = hotel)) +
+  geom_col() +
+  facet_grid(hotel ~ deposit_type) + 
+  scale_fill_manual(values = c("City Hotel" = "#006688", "Resort Hotel" = "#14bbcc")) +
+  labs(title = "Cancellation Drivers: Interaction of Customer, Deposit & Hotel",
+       subtitle = "Excluding Non-Refundable bookings",
+       y = "Cancellation Rate (%)",
+       x = "Customer Type") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none") 
+
+
+
+## without excluding
+master_cancel_data1 <- hotel_bookings %>%
+  group_by(hotel, customer_type, deposit_type) %>%
+  summarise(cancel_rate = mean(is_canceled) * 100, .groups = 'drop')
+
+ggplot(data = master_cancel_data1, aes(x = customer_type, y = cancel_rate, fill = hotel)) +
+  geom_col() +
+  facet_grid(hotel ~ deposit_type) + 
+  scale_fill_manual(values = c("City Hotel" = "#006688", "Resort Hotel" = "#14bbcc")) +
+  labs(title = "Cancellation Drivers: Interaction of Customer, Deposit Type & Hotel",
+       y = "Cancellation Rate (%)",
+       x = "Customer Type") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none") 
+
+
+# non percentage
+
+master_cancel_data2 <- hotel_bookings %>%
+  group_by(hotel, customer_type, deposit_type, is_canceled) %>%
+  summarise(total_bookings = n(), .groups = 'drop')
+
+ggplot(data = master_cancel_data2, aes(x = customer_type, y = total_bookings, fill = hotel)) +
+  geom_col() +
+  facet_grid(hotel ~ deposit_type) + 
+  scale_fill_manual(values = c("City Hotel" = "#006688", "Resort Hotel" = "#14bbcc")) +
+  labs(title = "Cancellation Drivers: Interaction of Customer, Deposit Type & Hotel",
+       y = "Cancellation Amount",
+       x = "Customer Type") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none") 
+
+
+# stacked cancelled/not
+  master_cancel_data3 <- hotel_bookings %>%
+  group_by(hotel, customer_type, deposit_type, is_canceled) %>%
+  summarise(total_bookings = n(), .groups = 'drop') %>% 
+    filter(deposit_type != "Refundable")
+    
+
+ggplot(data = master_cancel_data3, aes(x = customer_type, y = total_bookings, fill = as.factor(is_canceled))) +
+  geom_col(position = "stack") + 
+  facet_grid(hotel ~ deposit_type, scales = "free_y") + 
+  scale_fill_manual(values = c("0" = "#38a866", "1" = "#cc4955"),
+                    labels = c("Not Canceled", "Canceled")) +
+  labs(title = "Cancellation Amount: Customer and Deposit Type Interaction",
+       y = "Number of Bookings",
+       x = "Customer Type",
+       fill = "Status") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "bottom") 
+
+#without free
+
+ggplot(data = master_cancel_data3, aes(x = customer_type, 
+                                       y = total_bookings, 
+                                       fill = as.factor(is_canceled))) +
+  geom_col(position = "stack") + 
+  facet_grid(hotel ~ deposit_type) + 
+  scale_fill_manual(values = c("0" = "#38a866", "1" = "#cc4955"), 
+                    labels = c("Not Canceled", "Canceled")) +
+  labs(title = "Cancellation Amount: Customer and Deposit Type Interaction",
+       y = "Number of Bookings", x = "Customer Type", fill = "Status") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), 
+        legend.position = "bottom")
+
+
+ggplot(data = hotel_bookings, aes(x = as.factor(is_canceled), y = lead_time, fill = hotel)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.6) +
+  scale_x_discrete(labels = c("Not Canceled", "Canceled")) +
+  scale_fill_manual(values = c("City Hotel" = "#006688", "Resort Hotel" = "#14bbcc")) +
+  facet_wrap(~ hotel) + 
+  coord_cartesian(ylim = c(0, 400)) +
+  labs(title = "Impact of Lead Time on Cancellations by Hotel", 
+       x = "Cancellation Status", y = "Lead Time (Days)") +
+  theme(legend.position = "none")
+
+
+
+sample_bookings <- hotel_bookings %>% sample_n(5000) 
+
+ggplot(data = sample_bookings, aes(x = as.factor(total_of_special_requests), 
+           y = lead_time, color = as.factor(is_canceled))) +
+  geom_jitter(width = 0.2, alpha = 0.5, size = 2) +
+  scale_color_manual(values = c("0" = "lightgrey","1" = "black"), 
+                     labels = c("Not Canceled", "Canceled")) +
+  labs(title = "Lead Time vs Special Requests",
+       x = "Number of Special Requests", y = "Lead Time (Days)", color = "Status") +
+  theme_minimal()
+
+
+
+
+
+revenue_summary <- hotel_bookings %>%
+  group_by(market_segment) %>%
+  summarise(revenue_mil = sum(adr * total_nights, na.rm = TRUE) / 1000000)
+
+ggplot(data = revenue_summary, aes(x = reorder(market_segment, revenue_mil), y = revenue_mil)) +
+  geom_col(fill = "lightblue") +
+  scale_y_continuous(labels = scales::dollar_format(prefix = "€", suffix = "M")) +
+  coord_flip() +
+  labs(title = "Total Revenue by Market Segment",
+       x = "Market Segment", 
+       y = "Total Revenue (Millions)")
+
+
+
+
+
+
+#### profit ####
+
+set.seed(123)
+sampled_revenue_data <- hotel_bookings %>%
+  filter(adr < 400, adr > 0, lead_time < 400) %>%
+  sample_n(5000)
+
+ggplot(data = sampled_revenue_data, aes(x = lead_time, y = adr, color = hotel)) +
+  geom_point(alpha = 0.3) + 
+  geom_smooth(method = "lm") +
+  scale_color_manual(values = c("City Hotel" = "lightblue", "Resort Hotel" = "tomato")) +
+  labs(title = "Pricing Strategy: ADR vs. Lead Time",
+       subtitle = "Linear trend based on random sample of 5,000 bookings",
+       x = "Lead Time (Days)",
+       y = "Price per Night (ADR)") +
+  theme_minimal()
+
+
+# wavy one 
+seasonal_data <- hotel_bookings %>%
+  filter(adr < 400, adr > 0)
+
+ggplot(data = seasonal_data, aes(x = arrival_date_week_number, y = adr, color = hotel)) +
+  geom_smooth(se = FALSE, size = 1.5) + 
+  scale_color_manual(values = c("City Hotel" = "#006688", "Resort Hotel" = "#14bbcc")) +
+  labs(title = "Seasonal Booking Price",
+       subtitle = "Resort prices spike in summer, City prices are more stable.",
+       x = "Week of the Year (1-53)",
+       y = "Average Daily Rate (ADR)") +
+  scale_y_continuous(labels = scales::dollar_format(prefix = "€")) +
+  theme_minimal()
+
+#profit version
+
+revenue_summary_hotel <- hotel_bookings %>%
+  group_by(hotel, arrival_date_week_number) %>%
+  summarise(weekly_revenue = sum(total_revenue, na.rm = TRUE), .groups = 'drop')
+
+ggplot(data = revenue_summary_hotel, aes(x = arrival_date_week_number, y = weekly_revenue, color = hotel)) +
+  geom_line(size = 1.5) + 
+  scale_color_manual(values = c("City Hotel" = "#006688", "Resort Hotel" = "#14bbcc")) +
+  labs(title = "Weekly Total Revenue",
+       subtitle = "City Hotel revenue is consistently higher; Resorts peak in summer.",
+       x = "Week of the Year (1-53)", y = "Total Revenue") +
+  scale_y_continuous(labels = scales::dollar_format(prefix = "€", scale = 1e-6, suffix = "M")) +
+  theme_minimal()
+
+
+
+ggplot(data = hotel_bookings, aes(x = arrival_date_week_number, y = total_revenue, color = hotel)) +
+  geom_smooth(size = 1.5) + 
+  scale_color_manual(values = c("City Hotel" = "#006688", "Resort Hotel" = "#14bbcc")) +
+  labs(title = "Seasonal Booking Profit",
+       subtitle = "Resort profit spike in summer, City prices are more stable.",
+       x = "Week of the Year (1-53)",
+       y = "Total Revenue") +
+  scale_y_continuous(labels = scales::dollar_format(prefix = "€")) +
+  theme_minimal()
+
+
+
+
+#wavy but spiky. DONT RUN TAKES FOREVER
+ggplot(data = seasonal_data, aes(x = arrival_date_week_number, y = adr, color = hotel)) +
+  geom_line(size = 1.5) + 
+  scale_color_manual(values = c("City Hotel" = "#006688", "Resort Hotel" = "#14bbcc")) +
+  labs(title = "Seasonal Booking Price",
+       subtitle = "Resort prices spike in summer, City prices are more stable.",
+       x = "Week of the Year (1-53)",
+       y = "Average Daily Rate (ADR)") +
+  scale_y_continuous(labels = scales::dollar_format(prefix = "€")) +
+  theme_minimal()
+
+#booking amount
+booking_volume_data <- hotel_bookings %>%
+  group_by(arrival_date_week_number, hotel) %>%
+  summarise(total_bookings = n(), .groups = 'drop')
+
+ggplot(data = booking_volume_data, aes(x = arrival_date_week_number, y = total_bookings, 
+                                       color = hotel)) +
+  geom_line(size = 1.5) + 
+  scale_color_manual(values = c("City Hotel" = "#006688", "Resort Hotel" = "#14bbcc")) +
+  labs(title = "Seasonal Booking Volume",
+       x = "Week of the Year (1-53)", y = "Number of Bookings") +
+  scale_y_continuous(labels = scales::comma) + 
+  theme_minimal()
+
+
+
+# violin
+profit_data <- hotel_bookings %>%
+  filter(adr < 300, adr > 0, total_nights > 0)
+
+ggplot(data = profit_data, aes(x = customer_type, y = adr, fill = hotel)) +
+  geom_violin(trim = TRUE, alpha = 0.7) +
+  geom_boxplot(width = 0.1, fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("City Hotel" = "lightblue", "Resort Hotel" = "tomato")) +
+  labs(title = "Customer Value Analysis: Distribution of Price (ADR)",
+       subtitle = "Transient guests have a wider price range (higher potential value) than Groups.",
+       x = "Customer Type",
+       y = "Price Paid (ADR)") +
+  theme_minimal()
+
+# violin pt 2
+
+profit_data2 <- hotel_bookings %>%
+  filter(adr < 300, adr > 0, total_nights > 0) %>% 
+  filter(!market_segment %in% c("Undefined", "Aviation"))
+  
+
+ggplot(data = profit_data2, aes(x = market_segment, y = adr, fill = hotel)) +
+  geom_violin(trim = TRUE, alpha = 0.7) +
+  geom_boxplot(width = 0.1, fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("City Hotel" = "#006688", "Resort Hotel" = "#14bbcc")) +
+  labs(title = "Distribution of Price (ADR) by Market Segment",
+       x = "Market Segment",
+       y = "Price Paid (ADR)") +
+  theme_minimal()
+
+
+
+
+# pt 3
+
+
+profit_data3 <- hotel_bookings %>%
+  filter(adr < 300, adr > 0, total_nights > 0) %>% 
+  filter(market_segment %in% c("Direct", "Groups", "Offline TA/TO", "Online TA"))
+ggplot(data = profit_data3, aes(x = market_segment, y = adr, fill = hotel)) +
+  geom_violin(trim = TRUE, alpha = 0.7) +
+  geom_boxplot(width = 0.1, fill = "white", outlier.shape = NA) +
+  scale_fill_manual(values = c("City Hotel" = "#006688", "Resort Hotel" = "#14bbcc")) +
+  labs(title = "Distribution of Price (ADR) by Market Segment",
+       x = "Market Segment",
+       y = "Price Paid (ADR)") +
+  theme_minimal()
+
+
+
+
+room_data <- hotel_bookings %>%
+  mutate(room_changed = reserved_room_type != assigned_room_type)
+
+ggplot(data = room_data, aes(x = room_changed, fill = as.factor(is_canceled))) +
+  geom_bar(position = "fill") +
+  scale_fill_manual(values = c("#38a866", "#cc4955"), 
+                    labels = c("Not Canceled", "Canceled")) +
+  scale_x_discrete(labels = c("Got Reserved Room", "Room Changed")) +
+  labs(title = "Operational Impact: Does changing rooms cause cancellations?",
+       y = "Proportion", x = "Room Assignment Status", fill = "Status") +
+  theme_minimal()
+
+
+
+
+
+ggplot(data = hotel_bookings, aes(x = arrival_date_week_number, color = as.factor(is_canceled))) +
+  geom_freqpoly(binwidth = 1, size = 1) + 
+  facet_wrap(~ hotel, nrow = 2) +
+  scale_color_manual(values = c("#38a866", "#cc4955"), labels = c("Check-Out", "Canceled")) +
+  labs(title = "Weekly Volume: Cancellations vs. Check-outs",
+       subtitle = "Identifying peak stress weeks for operations",
+       x = "Week of Year", y = "Number of Bookings", color = "Status") +
+  theme_minimal()
+
+
+
+
+hotel_bookings$total_nights <- hotel_bookings$stays_in_weekend_nights + hotel_bookings$stays_in_week_nights
+
+stay_data <- hotel_bookings %>%
+  filter(adr < 300, adr > 0, total_nights > 0, total_nights < 21) %>% 
+  sample_n(5000)
+
+# ADR vs total nights
+ggplot(data = stay_data, aes(x = total_nights, y = adr, color = hotel)) +
+  geom_point(alpha = 0.2) +
+  geom_jitter(width = 0.2, alpha = 0.5, size = 1) +
+  geom_smooth(method = "loess", span = 0.5) +
+  scale_color_manual(values = c("City Hotel" = "lightblue", "Resort Hotel" = "tomato")) +
+  scale_x_continuous(breaks = seq(1, 20, 2)) +
+  labs(title = "Revenue Optimization: Price vs. Length of Stay",
+       subtitle = "Resort Hotel prices drop significantly after 7 nights (Weekly Discounts).",
+       x = "Length of Stay (Nights)",
+       y = "Average Daily Rate (ADR)") +
+  theme_minimal()
+
+
+
+####SORTING THE 99 ####
+
+# new category column to compare groups
+integrity_check <- hotel_bookings %>%
+  mutate(group_type = case_when(
+    deposit_type == "Non Refund" & is_canceled == 1 ~ "Non-Refund Cancelled",
+    deposit_type == "No Deposit" & is_canceled == 1 ~ "Refundable/No Deposit Cancelled",
+    is_canceled == 0 ~ "Not Cancelled", TRUE ~ NA_character_)) %>%
+  filter(!is.na(group_type)) %>%
+  group_by(group_type) %>%
+  summarise(avg_requests = mean(total_of_special_requests), total_parking = sum(required_car_parking_spaces))
+
+# plotting
+ggplot(data = integrity_check, aes(x = reorder(group_type, -avg_requests), y = avg_requests, fill = group_type)) +
+  geom_col() +
+  scale_fill_manual(values = c("Non-Refund Cancelled" = "#cc4955", "Not Cancelled" = "#38a866", 
+                               "Refundable/No Deposit Cancelled" = "darkgreen")) +
+  labs(title = "Deposit Type vs Special Requests",
+       subtitle = "Non-Refundable has almost 0 requests. Likely pre-booked, empty inventory, or flawed data.",
+       y = "Average Special Requests per booking", x = NULL) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+
+
+contradictions <- hotel_bookings %>%
+  filter(is_canceled == 1 & reservation_status == "Check-Out")
+
+nrow(contradictions)
+
+
+
+
+set.seed(123)
+segment_price_data <- hotel_bookings %>%
+  filter(adr < 300, adr > 0, lead_time < 400) %>%
+  filter(market_segment %in% c("Online TA", "Offline TA/TO", "Direct", "Groups")) %>% 
+  sample_n(5000)
+
+ggplot(data = segment_price_data, aes(x = lead_time, y = adr, color = market_segment)) +
+  geom_point(alpha = 0.2, size = 1) + 
+  geom_smooth(se = FALSE) + 
+  facet_wrap(~ hotel) + 
+  scale_y_continuous(labels = scales::dollar_format(prefix = "€")) +
+  labs(title = "Pricing Power by Market Segment",
+       x = "Lead Time (Days)",
+       y = "Average Daily Rate",
+       color = "Market Segment") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+
+# testing other option
+
+ggplot(data = segment_price_data, aes(x = lead_time, y = adr, color = market_segment)) +
+  geom_smooth(se = FALSE, size = 1.5) + 
+  facet_wrap(~ hotel) + 
+  scale_y_continuous(labels = scales::dollar_format(prefix = "€")) +
+  labs(title = "Pricing Curve: Lead Time vs. Rate",
+       subtitle = "Resort uses dynamic pricing, City pricing is flat.",
+       x = "Lead Time (Days)", y = "Average Daily Rate", color = "Market Segment") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+
+
+
+#without filtering
+set.seed(123)
+segment_price_data <- hotel_bookings %>%
+  filter(adr < 300, adr > 0, lead_time < 400) %>%
+  sample_n(5000)
+
+ggplot(data = segment_price_data, aes(x = lead_time, y = adr, color = market_segment)) +
+  geom_point(alpha = 0.2, size = 1) + 
+  geom_smooth(se = FALSE) + 
+  facet_wrap(~ hotel) + 
+  scale_y_continuous(labels = scales::dollar_format(prefix = "€")) +
+  labs(title = "Pricing Power by Market Segment",
+       x = "Lead Time (Days)",
+       y = "Average Daily Rate",
+       color = "Market Segment") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+
+
+
+# PARKING
+integrity_check_parking <- hotel_bookings %>%
+  mutate(group_type = case_when(
+    deposit_type == "Non Refund" & is_canceled == 1 ~ "Suspect Group (Non-Refund Cancelled)",
+    deposit_type == "No Deposit" & is_canceled == 1 ~ "Regular Cancelled",
+    is_canceled == 0 ~ "Successful Stays",
+    TRUE ~ NA_character_ 
+  )) %>%
+  filter(!is.na(group_type)) %>%
+  group_by(group_type) %>%
+  summarise(
+    avg_parking = mean(required_car_parking_spaces)
+  )
+
+ggplot(data = integrity_check_parking, aes(x = reorder(group_type, -avg_parking), y = avg_parking, fill = group_type)) +
+  geom_col() +
+  scale_fill_manual(values = c("Suspect Group (Non-Refund Cancelled)" = "tomato", 
+                               "Successful Stays" = "darkgreen", 
+                               "Regular Cancelled" = "lightblue")) +
+  labs(title = "humans pt 2 parking",
+       subtitle = "0 parking spaces for nonrefund",
+       y = "Average Parking Spaces per Booking",
+       x = NULL) +
+  theme_minimal() +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 15, hjust = 1))
+
+
+
+# x
+cancellation_by_deposit <- hotel_bookings %>%
+  group_by(deposit_type) %>%
+  summarise(total_bookings = n(),
+            total_cancellations = sum(is_canceled))
+
+cancellation_by_deposit
+
+
+
+
+cancellation_by_deposit$deposit_type <- factor(cancellation_by_deposit$deposit_type, levels = c("Refundable", "Non Refund", "No Deposit"))
+
+#plot the chart
+ggplot(cancellation_by_deposit, aes(x = deposit_type, y = total_cancellations, fill = deposit_type)) +
+  geom_col(width = 0.5) +
+  geom_text(aes(label = total_cancellations), position = position_dodge(width = 0.5), 
+            vjust = -2.9, hjust = 1, size = 3)
+
+
+
+
+barplot(sorted_deposit_rate,
+        main = "Cancellation Rate by Deposit Type",
+        ylab = "Cancellation Rate (%)",
+        xlab = "Deposit Type",
+        col = c("darkred", "tomato", "lightblue"), 
+        ylim = c(0, 100))
+
+
+
+# prep
+cancellation_by_deposit <- hotel_bookings %>%
+  count(deposit_type, is_canceled) %>%
+  group_by(deposit_type) %>%
+  mutate(pct = n / sum(n))
+
+# plot
+ggplot(cancellation_by_deposit, aes(x = deposit_type, y = n, fill = as.factor(is_canceled))) +
+  geom_col(position = "fill", width = 0.5) +
+  geom_text(aes(label = scales::percent(pct, accuracy = 1)), 
+            position = position_fill(vjust = 0.5), 
+            size = 3) +
+  scale_fill_manual(values = c("lightblue", "tomato"), 
+                    labels = c("Not Canceled", "Canceled")) +
+  labs(title = "Cancellation Distribution by Deposit Type",
+       y = "Proportion",
+       x = "Deposit Type",
+       fill = "Status") +
+  theme_minimal()
+
+ggplot(cancellation_by_deposit, aes(x = deposit_type, y = n, fill = as.factor(is_canceled))) +
+  geom_col(width = 0.5) +
+  geom_text(aes(label = n), 
+            position = position_fill(vjust = 10000),
+            size = 3) +
+  scale_fill_manual(values = c("lightblue", "tomato"), 
+                    labels = c("Not Canceled", "Canceled")) +
+  labs(title = "Cancellation Distribution by Deposit Type",
+       y = "Bookings",
+       x = "Deposit Type",
+       fill = "Status") +
+  theme_minimal()
+
+
+
+
+
+
+# filled
+ggplot(cancellation_by_deposit, aes(x = deposit_type, 
+                                    y = n, 
+                                    fill = as.factor(is_canceled))) +
+  geom_col(width = 0.5, position = "fill") + 
+  
+  geom_text(aes(label = n), 
+            position = position_fill(vjust = 0.5),
+            size = 3,
+            color = "white") +
+  
+  scale_fill_manual(values = c("#38A866", "#cc4955"), 
+                    labels = c("Not Canceled", "Canceled")) +
+    labs(title = "Cancellation Distribution by Deposit Type",
+       y = "Proportion", 
+       x = "Deposit Type",
+       fill = "Status") +
+  theme_minimal()
+
+
+
+# unfilled
+ggplot(cancellation_by_deposit, aes(x = deposit_type, 
+                                    y = n, 
+                                    fill = as.factor(is_canceled))) +
+  geom_col(position = "dodge") + 
+    geom_text(aes(label = n), 
+              position = position_dodge(width = 0.9), 
+              vjust = -0.5, 
+              size = 3) +
+  
+  scale_fill_manual(values = c("#38A866", "#cc4955"), 
+                    labels = c("Not Canceled", "Canceled")) +
+    scale_y_continuous(labels = scales::comma) +
+  
+  labs(title = "Cancellation Counts by Deposit Type",
+       subtitle = "Side-by-side view to compare volume differences",
+       y = "Number of Bookings", 
+       x = "Deposit Type", 
+       fill = "Status") +
+  theme_minimal()
+
+
+
+
+
+#### intro section ####
+global_status <- hotel_bookings %>%
+  count(is_canceled) %>%
+  mutate(pct = n / sum(n),
+         status = ifelse(is_canceled == 1, "Canceled", "Check-Out"))
+
+ggplot(global_status, aes(x = 2, y = pct, fill = status)) +
+  geom_col(color = "white") +
+  coord_polar(theta = "y", start = 0) +
+  xlim(0.5, 2.5) +
+  geom_text(aes(label = scales::percent(pct, accuracy = 1)), 
+            position = position_stack(vjust = 0.5), 
+            color = "white", fontface = "bold", size = 5) +
+  
+  scale_fill_manual(values = c("Canceled" = "#CC4955", "Check-Out" = "#38A866")) +
+  theme_void() +
+  labs(title = "Cancellation Status", fill = "Status",
+       subtitle = "Over 1 in 3 bookings fails to go through.")
+
+
+
+trend_data <- hotel_bookings %>%
+  mutate(arrival_date = as.Date(paste(arrival_date_year, arrival_date_month, "01", sep = "-"), format = "%Y-%B-%d")) %>%
+  group_by(arrival_date) %>%
+  summarise(cancel_rate = mean(is_canceled) * 100)
+
+ggplot(trend_data, aes(x = arrival_date, y = cancel_rate)) +
+  geom_line(color = "darkgrey", linewidth = 1) +
+  geom_smooth(se = FALSE, color = "#cc4955") +
+  ylim(0, 100) +
+  labs(title = "Cancellation Rate Trend",
+       subtitle = "Cancellation rate has remained consistently high between 30-40%",
+       x = "Date", y = "Cancellation Rate (%)") +
+  theme_minimal()
+
+
+plot_data <- hotel_bookings %>%
+  count(hotel, is_canceled)
+ggplot(plot_data, aes(x = hotel, y = n, fill = as.factor(is_canceled))) +
+  geom_col() + 
+    geom_text(aes(label = n), 
+            position = position_stack(vjust = 0.5), 
+            size = 4,
+            colour = "white") +
+    scale_fill_manual(values = c("#38A866", "#cc4955"), 
+                    labels = c("Check-Out", "Canceled")) +
+  labs(title = "Volume and Cancellation Split by Hotel",
+       y = "Number of Bookings",
+       x = NULL,
+       fill = "Status") +
+  theme_minimal()
+
+#trying by percentages
+
+labeled_plot_data <- hotel_bookings %>%
+  count(hotel, is_canceled) %>%
+  group_by(hotel) %>%
+  mutate(
+    pct = n / sum(n), 
+    combined_label = paste0(round(pct * 100), "%")
+  ) %>%
+  ungroup()
+
+ggplot(labeled_plot_data, 
+       aes(x = hotel, 
+           y = n, 
+           fill = as.factor(is_canceled))) +
+  geom_col() + 
+  geom_text(aes(label = combined_label),
+            position = position_stack(vjust = 0.5), 
+            size = 4,
+            colour = "white",
+            lineheight = 0.9) + 
+  scale_fill_manual(values = c("0" = "#38A866", 
+                               "1" = "#cc4955"), 
+                    labels = c("Check-Out", 
+                               "Canceled")) +
+  labs(title = 
+         "Volume (Count) and Cancellation Split by Hotel",
+       y = "Number of Bookings",
+       x = NULL,
+       fill = "Status") +
+  theme_minimal()
+
+
+channel_data <- hotel_bookings %>%
+  filter(market_segment %in% c("Online TA", "Direct", "Offline TA/TO", "Groups", "Corporate")) %>%
+  group_by(market_segment) %>%
+  summarise(rate = mean(is_canceled) * 100)
+
+ggplot(channel_data, aes(x = reorder(market_segment, rate), y = rate, fill = market_segment)) +
+  geom_col() +
+  coord_flip() +
+  geom_text(aes(label = sprintf("%.1f%%", rate)), hjust = -0.2) +
+  scale_y_continuous(limits = c(0, 80)) +
+  
+  scale_fill_manual(values = c("Direct" = "darkgreen", 
+                               "Online TA" = "tomato", 
+                               "Groups" = "grey", "Offline TA/TO" = "grey", "Corporate" = "grey")) +
+  
+  labs(title = "Cancellation Rate by Booking Channel",
+       subtitle = "Direct bookings are 2x more secure than Online TA bookings.",
+       y = "Cancellation Rate (%)",
+       x = NULL) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+
+#### come back to. quadrants. would be crazy if we can add ####
+library(tidyverse)
+library(scales)
+install.packages("ggrepel")
+library(ggrepel)
+install.packages("ggrepel", dependencies = TRUE, INSTALL_opts = "--no-lock")
+
+risk_matrix <- hotel_bookings %>%
+  filter(market_segment != "Undefined") %>%
+  group_by(market_segment) %>%
+  summarise(
+    booking_volume = n(),
+    cancel_rate = mean(is_canceled),
+    total_cancelled = sum(is_canceled)
+  )
+
+ggplot(risk_matrix, aes(x = booking_volume, y = cancel_rate, label = market_segment)) +
+  geom_hline(yintercept = 0.37, linetype = "dashed", color = "grey") + # global average 
+  geom_vline(xintercept = median(risk_matrix$booking_volume), linetype = "dashed", color = "grey") +
+  
+  #bubbles
+  geom_point(aes(size = total_cancelled, fill = market_segment), 
+             shape = 21, color = "white", alpha = 0.8) +
+  
+  geom_text_repel(point.padding = 0.5, size = 4) +
+  
+  scale_y_continuous(labels = percent_format(), limits = c(0, 1)) +
+  scale_x_continuous(labels = comma) +
+  scale_size_continuous(range = c(5, 20), guide = "none") +
+  scale_fill_brewer(palette = "Set1") +
+  
+  labs(title = "Portfolio Risk Analysis: Rate vs. Volume",
+       subtitle = "Groups have the highest Risk (61%), but Online TAs drive the highest Volume.",
+       x = "Total Booking Volume (Logarithmic Scale recommended if data is skewed)",
+       y = "Cancellation Rate (Risk)",
+       fill = "Segment") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+ggplot(data = risk_matrix, aes(x = booking_volume, y = cancel_rate, color = market_segment)) +
+  geom_point()
+
+
+segment_summary <- hotel_bookings %>%
+  filter(market_segment != "Undefined") %>%
+  group_by(market_segment) %>%
+  summarise(booking_volume = n(), cancel_rate = mean(is_canceled))
+
+ggplot(data = segment_summary, aes(x = booking_volume, y = cancel_rate, color = market_segment)) +
+  geom_point(size = 6) +
+  
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Volume vs. Cancellation Rate", x = "Number of Bookings", y = "Cancellation Rate", colour = "Market Segment") +
+  theme_minimal()
+
+
+
